@@ -1,0 +1,422 @@
+---
+title: 'Programowanie w R: Projekt'
+author: "Karol KaŸmierczak"
+date: "3 maja 2018"
+output: 
+  html_document: 
+    keep_md: yes
+    toc: yes
+    toc_float: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Wnioski koñcowe
+
+1. G³ównym czynnikiem wp³ywaj¹cym na d³ugoœæ œledzia jest temperatura przy powierzchni wody.
+2. Zagêszczenie planktonu jest skorelowane z d³ugoœci¹ œledzia w niewielkim stopniu. Jego spadek jest prawdobnie tak¿e nastêpstwem wzrostu temperatury wody.
+3. Intensywnoœæ po³owów ma niewielki wp³yw na przeciêtn¹ d³ugoœæ œledzia.
+
+#Wprowadzenie 
+
+Niniejszy raport stanowi æwiczenie umiejêtnoœci oraz prezentacjê wiadomoœci zdobytych podczas przedmiotu _Programowanie w R_ i innych zajêæ w ramach studium podyplomowego __Hurtowie Danych i analiza danych w celach biznesowych_ Politechniki Poznañskiej. Przy okazji podejmiemy próbê odpowiedzi na pytanie postawione w zadaniu. Co powoduje kar³owancenie œledzi oceanicznych wy³awianych w europie? 
+
+Dane, które pos³u¿y³y do badania mo¿na pobraæ [tutaj](http://www.cs.put.poznan.pl/dbrzezinski/teaching/sphd/sledzie.csv).
+
+W celu odpowiedzi na postawione pytanie pos³u¿ymy siê narzêdziami exploracji danych zaimplementowanymi w jêzyku R. Wykorzystane biblioteki prezentuje poni¿szy bloku kodu.
+
+```{r kod_wyliczaj¹cy_wykorzystane_biblioteki, message=FALSE}
+library(gridExtra) 
+library(reshape2) 
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(corrplot) 
+library(plotly)
+library(caret)
+```
+
+
+#Dane Ÿród³owe
+
+Surowe dane s¹ wynikiem pomiarów rozmiaru œledzia oceanicznego wy³awianego w Europie. Dane by³y zbierane z po³owów komercyjnych jednostek. W ramach po³owu jednej jednostki losowo wybierano od 50 do 100 sztuk trzyletnich œledzi. Ponadto za³¹czona do pliku informacja œwiadczy, ¿e obserwacje by³y zapisywane chronologicznie. W poni¿szej tabeli zamieœci³em opis atrybutów Ÿród³owego zbioru danych. Tam gdzie by³o to mo¿liwe za³¹czy³em linki do odpowiednich artyku³ów wikipedii.
+
+nazwa zmiennej | opis [jednostka]
+--------|--------------------------------------------------------
+X       | Liczba porz¹dkowa
+length  | d³ugoœæ z³owionego œledzia [cm]
+cfin1   | dostêpnoœæ planktonu [zagêszczenie [Calanus finmarchicus gat. 1](https://en.wikipedia.org/wiki/Calanus_finmarchicus)]
+cfin2   | dostêpnoœæ planktonu [zagêszczenie [Calanus finmarchicus gat. 2](https://en.wikipedia.org/wiki/Calanus_finmarchicus)]
+chel1   | dostêpnoœæ planktonu [zagêszczenie Calanus helgolandicus gat. 1]
+chel2   | dostêpnoœæ planktonu [zagêszczenie Calanus helgolandicus gat. 2]
+lcop1   | dostêpnoœæ planktonu [zagêszczenie [wid³onogów gat. 1](https://en.wikipedia.org/wiki/Copepod)]
+lcop2   | dostêpnoœæ planktonu [zagêszczenie [wid³onogów gat. 2](https://en.wikipedia.org/wiki/Copepod)]
+fbar    | natê¿enie po³owów w regionie [u³amek pozostawionego narybku]
+recr    | roczny narybek [liczba œledzi]
+cumf    | ³¹czne roczne natê¿enie po³owów w regionie [u³amek pozostawionego narybku]
+totaln  | ³¹czna liczba ryb z³owionych w ramach po³owu [liczba œledzi]
+sst     | temperatura przy powierzchni wody [°C]
+sal     | poziom zasolenia wody [Knudsen ppt]
+xmonth  | miesi¹c po³owu [numer miesi¹ca]
+nao     | [oscylacja pó³nocnoatlantycka](https://pl.wikipedia.org/wiki/Oscylacja_Pó³nocnoatlantycka) [mb]
+
+Opis zbioru przeznaczonego do analizy nie zawiera informacji na temat metodologii pomiaru zagêszczenia planktonu. Nie znamy te¿ celu, dla którego zdecydowano siê na pomiar dwóch szczególnych gatunków wid³onogów, ani dlaczego zró¿nicowano je pod wzglêdem jakoœciowym. Szerszego wyjaœnienia wymaga³yby tak¿e zmienne opisuj¹ce natê¿enie po³owów. Jego brak uniemo¿liwia w³aœciw¹ interpretacjê wyników na ich podstawie. 
+
+##Wczytanie danych
+
+Dane Ÿród³owe dla naszej analizy zosta³y umieszczone w pliku sledzie.csv. 
+Poni¿szy blok kodu prezentuje wczytanie danych z pliku Ÿród³owego i zapisanie ich jako data frame sledzie.
+
+```{r wczytanie_danych_z_pliku}
+sledzie <- read.csv("~/R/workspace/Rcwicze/sledzie.csv",  na.strings="?")
+```
+
+Poni¿ej dziesiêæ piêrwszych wierszy z zestawu danych. Zauwa¿my, ¿e w pierwszym wierszu tabeli wystêpuje brakuj¹ca wartoœæ atrybutu **chel2**.
+
+```{r prezentacja danych surowych}
+knitr::kable(head(sledzie,n = 5))
+```
+
+
+  
+```{r str}
+str(sledzie)
+```
+
+#Wstêpne przetwarzanie danych
+
+Poni¿szy blok kodu generuje statystyki opisowe Ÿród³owego zbioru danych. 
+W obliczeniach pomijamy zmienne:
+
++ **X**, która jako zmienna porz¹dkowa nie wnosi nic do naszej analizy,
++ **xmonth**, ograniczymy siê do sprawdzenia, czy zawiera jedynie poprawne wartoœci (Liczby ca³kowite 1,2,..,12). 
+
+Dla pozosta³ych zmiennych odnotujmy nastêpuj¹ce obserwacje:
+
++ Atrybut **fbar**, oraz **cumf** zawieraj¹ siê w przedziale (0,1). 
++ **nao** jest jedyn¹ zmienn¹ przyjmuj¹c¹ wartoœci ujemne.
++ Ró¿nica miêdzy najwy¿sz¹ temperatur¹ przy powierzchni wody  (**sst**) na przestrzeni 60 lat wynosi³a 2°C.
++ Najmniejsz¹ zmiennoœci¹ cechuje siê zasolenie wody. Ca³y jej zakres wynosi (0,2 ppt)
++ Wartoœci puste wystêpuj¹ dla siedmiu zmiennych. Oko³o 1600 przypadków dla ka¿dej z nich.
+
+```{r statystyki opisowe}
+summary(sledzie[-c(1,15)])
+```
+
+##Przetwarzenie wartoœci pustych
+
+Rzut okiem na pierwsze 5 wierszy wczytanego pliku sugeruje, ¿e wartoœci puste nie dominuj¹ w danych surowych. SprawdŸmy jaki wp³yw na rozmiar danych bêdzie mia³o ich usuniêcie.
+
+```{r utworzenie_tbl_df_sledzie} 
+
+tb_sledzie <- tbl_df(sledzie) %>%
+    filter(!is.na(chel1), !is.na(chel2), !is.na(cfin1) , !is.na(cfin2) , !is.na(lcop1) , !is.na(lcop2), !is.na(sst))
+```
+
+
+Liczba obserwacji data frame'u sledzie po usuniêciu wartoœci pustych to `r nrow(tb_sledzie)`. Stanowi to `r round(nrow(tb_sledzie)/nrow(sledzie)*100)`% rozmiaru pocz¹tkowego. 
+
+
+##Analiza atrybutów
+
+Poni¿szy kod wylicza ile unikalnych wartoœci posiada ka¿dy z atrybutów.
+
+```{r}
+unique_tb_sledzie <- tb_sledzie %>% 
+  summarise(length = n_distinct(length), cfin1 = n_distinct(cfin1), cfin2 = n_distinct(cfin2), chel1 = n_distinct(chel1), chel2 = n_distinct(chel2), lcop1 = n_distinct(lcop1),   lcop2 =n_distinct(lcop2), fbar = n_distinct(fbar), recr = n_distinct(recr), cumf = n_distinct(cumf), totaln = n_distinct(totaln), 
+            sst = n_distinct(sst), sal = n_distinct(sal), nao = n_distinct(nao)) 
+
+unique_tb_sledzie_t <- as.data.frame(cbind( as.matrix(names(unique_tb_sledzie)),  t(unique_tb_sledzie)))
+
+
+
+ggplot(unique_tb_sledzie_t, aes(x=reorder(V1, -as.integer(V2)), y = V2)) + 
+    geom_bar(stat = "identity") + 
+    labs(title ="liczba unikalnych wartoœci ka¿dego z atrybutów", x = "nazwa zmiennej", y="liczba unikalnych wartoœci") 
+```
+
+Najwiêksz¹ ró¿norodnoœci¹ cechuje siê zmienna length. Chocia¿ `r unique_tb_sledzie$length` unikalnych wartoœæ przy blisko piêædziesiêciu tysi¹cach obserwacji wydaje siê liczb¹ znikom¹ dla atrybutu ci¹g³ego to zauwa¿my, ¿e minimalna d³ugoœæ sledzia w naszym zbiorze danych wynosi `r min(tb_sledzie$length)`cm natomiast maksymalna `r max(tb_sledzie$length)`cm. Przy za³o¿eniu, ¿e pomiarów dokonywano z dok³adnoœci¹ do 0.5 centymetra, zmienna length powinna mieæ `r (max(tb_sledzie$length)-min(tb_sledzie$length))*2` unikalnych wartoœci, natomiast przy dok³adnoœci 0,01cm- `r (max(tb_sledzie$length)-min(tb_sledzie$length))*10`.
+
+###D³ugoœæ (length)
+
+spójrzmy na czêstoœci zmiennej length
+
+```{r czestosci_length}
+table(tb_sledzie$length)
+```
+
+Zwróæmy uwagê, ¿e tylko dla pojedyñczych obserwacji wynik pomiaru zapisano z dok³adnoœci¹ do 1mm. Przyjmijmy zatem, ¿e pomiaru dokonano z dok³adnoœci¹ do 5mm. Dla uspójnienia wyników zaokr¹glimy czêœci dziesiêtne z dok³adnoœci¹ do 0,5cm.  
+
+```{r zaokraglenie_length}
+tb_sledzie <- tb_sledzie %>%
+  mutate(length = round(length*2)/2)
+
+table(tb_sledzie$length)
+```
+
+Histogram tak uproszczonej zmiennej length prezentuje wykres poni¿ej. Czerwon¹ lini¹ zaznaczono krzyw¹ funkcji gêstoœci rozk³adu normalnego o œredniej i wariancji takich jak zmienna length.
+
+```{r}
+sledzie_hist <- ggplot(tb_sledzie, aes(x = length)) + geom_bar() + theme_light()
+
+n <- nrow(tb_sledzie)
+mean <- mean(tb_sledzie$length)
+sd <- sd(tb_sledzie$length)
+binwidth = 0.5 # passed to geom_histogram and stat_function
+set.seed(1)
+df <- data.frame(x = rnorm(n, mean, sd))
+
+sledzie_hist + stat_function(fun = function(x) dnorm(x, mean = mean, sd = sd) * n * binwidth , color = "darkred", size = 1)
+```
+Wykres wygl¹da na nieco sp³aszczony w stosunku do krzywej. Lewy ogon naszego histogramu jest wyraŸnie grubszy ni¿ prawy. Podobne wnioski mo¿na wyci¹gn¹æ z wzrokowej oceny wykresu kwantyl-kwantyl dla zmiennej length (poni¿ej). Nasycenie lewego ogona mo¿e byæ spowodowane przez zjawisko kar³owacenia. Na podstawie danych nie jesteœmy jednak w stanie okreœliæ jak kszta³towa³ siê rozmiar œledzi w kolejnych latach.
+
+```{r kwantyl-kwantyl_dla_length}
+ggplot(tb_sledzie, aes(sample = length)) + stat_qq() + stat_qq_line() + theme_light()
+
+```
+
+###Dane na temat dostêpnoœci plankotnu
+
+Poni¿szy blok kodu generuje wykres pude³kowy dla zmiennych opisuj¹cych zagêszczenie planktonu w miejscach gdzie dokonywano po³owów.
+
+```{r, fig.height=7}
+
+boxplot(tb_sledzie[,3:8], xlab ="gatunek planktonu", ylab="dostêpnoœæ planktonu", main = "Rozk³ady zagêszczenia rozwa¿anych gatunków planktonu")
+
+```
+
+Opis zbioru przeznaczonego do analizy nie zawiera informacji na temat metodologii pomiaru zagêszczenia. Jednak wykresy pude³kowe dla _Calanus finmarchicus_ (cfin1 i cfin2) pokazujê i¿ zdecydowana wiêkszoœæ pomiarów jest skupiona wokó³ zera. W szczególnoœci cfin1, w porównaniu z innymi gatunkami wid³onogów, niemal nie wystêpowa³ na ³owiskach gdzie dokonano obserwacji. 
+
+```{r}
+hist_cfin1 <- ggplot(tb_sledzie, aes(cfin1)) + geom_histogram(bins = 38) + theme_light() + labs(title="Calanus finmarchicus gat. 1", x="", y = "")
+hist_cfin2 <- ggplot(tb_sledzie, aes(cfin2)) + geom_histogram(bins = 20) + theme_light() + labs(title="Calanus finmarchicus gat. 2", x="", y = "")
+grid.arrange(hist_cfin1, hist_cfin2, nrow=1, top = "Histogram zagêszczenia", left ="Liczba obserwacji") 
+```
+
+Lepiej wygl¹da zagêszczenie _Calanus helgolandicus_. Obserwowane wartoœci s¹ wyraŸnie wiêksze od zera. Choæ na wykresie pude³kowym du¿e wartoœci (60, 80) s¹ oznaczone jako odstaj¹ce, histogramy pokazuj¹, ¿e wyst¹pi³y blisko lub ponad tysi¹c krotnie.
+
+```{r}
+hist_chel1 <- ggplot(tb_sledzie, aes(chel1)) + geom_histogram(bins = 80) + theme_light() + labs(title="Calanus helgolandicus gat. 1", x="", y = "")
+hist_chel2 <- ggplot(tb_sledzie, aes(chel2)) + geom_histogram(bins = 60) + theme_light() + labs(title="Calanus helgolandicus gat. 2", x="", y = "")
+grid.arrange(hist_chel1, hist_chel2, nrow=1, top = "Histogram zagêszczenia", left ="Liczba obserwacji") 
+```
+
+Histogramy dla pomiarów zagêszczenia wid³onogów równie¿ pokaza³y, i¿ wartoœci przedstawione na wykresie pude³kowym jako odstaj¹ce wystêpowa³y stosunkowo czêsto w stosunku do innych wyników.
+
+```{r}
+hist_lcop1 <- ggplot(tb_sledzie, aes(lcop1)) + geom_histogram(bins = 80) + theme_light() + labs(title="Wid³onogi gat. 1", x="", y = "")
+hist_lcop2 <- ggplot(tb_sledzie, aes(lcop2)) + geom_histogram(bins = 80) + theme_light() + labs(title="Wid³onogi gat. 2", x="", y = "")
+grid.arrange(hist_lcop1, hist_lcop2, nrow=1, top = "Histogram zagêszczenia", left ="Liczba obserwacji") 
+```
+
+Poni¿ej macierz korelacji zmiennych opisuj¹cych zagêszczenie planktonu i d³ugoœci œledzia. Wyznaczone wspó³czynniki pokazuj¹, ¿e d³ugoœæ œledzia nie jest liniowo skorelowana z zagêszczeniem planktonu. Liniowa korelacja wystêpuje natomiast pomiêdzy zmiennymi lcop1 oraz chel1. Wyp³ywa st¹d wniosek, ¿e _calanus helgolandicus_ jest g³ównym gatunkiem wid³onogów wystêpuj¹cych na obszarze po³owów objêtych badaniem i jego wystêpowanie decyduje o zagêszczeniu wid³onogów w ogóle.
+
+```{r}
+widlonogi_cor_mat <- cor(tb_sledzie[,2:8])
+
+corrplot(widlonogi_cor_mat, method="color", addCoef.col = "gray")
+```
+
+Powy¿sze wnioski potwierdzaj¹ tak¿e obserwacje diagramów punktowych dla omówionych par zmiennych.
+
+```{r}
+chel1_lcop1_point <- ggplot(tb_sledzie, aes(y=chel1, x = lcop1)) + geom_point() + theme_light() + geom_smooth(color="red", method = "lm") + labs(x = "wid³onogi 1. gat.", y = "calanus helgolandicus 1. gat.")
+chel2_lcop2_point <- ggplot(tb_sledzie, aes(y=chel2, x = lcop2)) + geom_point() + theme_light() + geom_smooth(color="red", method = "lm") + labs(x = "wid³onogi 2. gat.", y = "calanus helgolandicus 2. gat.")
+
+cfin1_lcop1_point <- ggplot(tb_sledzie, aes(y=cfin1, x = lcop1)) + geom_point() + theme_light() + labs(x = "wid³onogi 1. gat.", y = "calanus finmarchicus 1. gat.")
+cfin2_lcop2_point <- ggplot(tb_sledzie, aes(y=cfin2, x = lcop2)) + geom_point() + theme_light() + labs(x = "wid³onogi 2. gat.", y = "calanus finmarchicus 2. gat.")
+
+grid.arrange(chel1_lcop1_point, chel2_lcop2_point, nrow=1, top = "Zwi¹zek pomiêdzy zagêszczeniem calanus helgolandicus a zagêszczeniem wszystkich wid³onogów")
+
+grid.arrange(cfin1_lcop1_point, cfin2_lcop2_point, nrow=1, top = "Zwi¹zek pomiêdzy zagêszczeniem calanus finmarchicus a zagêszczeniem wszystkich wid³onogów")
+```
+```{r}
+length_lcop1_point <- ggplot(tb_sledzie, aes(y=length, x = lcop1)) + geom_point() + geom_smooth(color = "red", method = "lm") + theme_light() + labs(x = "wid³onogi gat. 1.", y = "lenght", title="Diagram punktowy: korelacja miêdzy d³ugoœci¹ œledzia, a zagêszczeniem wid³onogów gat 1.")
+
+length_lcop1_point
+```
+
+Na podstawie powy¿szych obserwacji w dalszej analizie pominiemy zmienne opisuj¹ce zagêszczenie planktonu za wyj¹tkiem lcop1, który jest najsilniej skorelowany liniowo z d³ugoœci¹ œledzia.
+
+##Badanie korelacji liniowej.
+
+W tej czêœci zaprezentujemy analizê korelacji miêdzy zmienn¹ length a pozosta³ymi atrybutami. Pochylimy siê tak¿e nad zale¿noœciami pomiêdzy pozota³ymi atrubutami opisowymi.
+
+Macierz korelacji dla tabeli tb_sledzie, po usuniêciu zmiennej porz¹dkowej i zredukowaniu zmiennych opisuj¹cych zagêszczenie planktonu do lcop1, prezentuje poni¿szy wykres. £atwo zauwa¿yæ, ¿e najsilniej skorelowana z atrybutem length jest zmienna sst opisuj¹ca temperaturê wody. Nie jest to jednak wartoœæ, która sugerowa³aby zale¿noœæ liniow¹.
+
+Wspó³czynnik korelcji pearsona wydaje siê te¿ odkrywaæ pewien wp³yw na d³ugoœæ zmiennych fbar oraz nao.
+
+```{r}
+all_cor_mat <- cor(tb_sledzie[,-c(1,3,4,5,6,8)])
+
+corrplot(all_cor_mat, method="color", addCoef.col = "gray")
+```
+
+Interesuj¹cy jest brak jakiejkolwiek korelacji miêdzy zmienn¹ xmonth, a pozosta³ymi atrybutami.
+
+Silna zale¿noœæ liniowa wystêpuje pomiêdzy zmiennymi fbar i cumf opisuj¹cymi odpowiednio natê¿enie po³owów w regionie oraz ³aczne roczne natê¿enie po³owów w regioniu. Mo¿e to oznaczaæ, ¿e natê¿enie po³owów na danym obszarze nie zmienia siê istotnie w ci¹gu roku. Brak zjawiska sezonowoœci w natê¿eniu po³owów t³umaczy tak¿e brak korelacji miêdzy zmienn¹ xmonth a pozosta³ymi atrubutami. 
+Nieco mniej ale nadal doœæ istotnie powi¹zane s¹ zmienne fbar i cumf ze zmienn¹ totaln. Zwi¹zek miêdzy ³acznym rocznym natê¿eniem po³owów, a liczb¹ œledzi z³owionych w ramach danego po³owu jest silniejszy ni¿ miêdzy natê¿eniem po³owów w regionie. Wydaje siê to dziwne i nie potrafimy podaæ sensownej interpretacji tego zjawiska.
+
+
+###Podsumowanie analizy korelacji
+
+Wykres poni¿ej prezentuje macierz korelacji dla zmiennych, które cechuj¹ siê najwy¿szym bezwzglednym wspó³czynnikiem korelacji pearsona z d³ugoœci¹ œledzia. Zmienne te nie s¹ jednak niezale¿ne miêdzy sob¹. Dominuj¹cy wp³yw na pozosta³e czynniki wydaje siê mieæ temperatura wody (sst). W szczególnoœci atrybut nao, czyli oscylacja pó³nocno atlantycka, któr¹ pominiemy w dalszej analizie. 
+
+```{r}
+red_all_cor_mat <- cor(tb_sledzie[,c(2,7,9,13,16)])
+
+corrplot(red_all_cor_mat, method="color", addCoef.col = "gray")
+```
+
+
+###Zale¿noœæ miêdzy zmianami przeciêtnej d³ugoœci œledzia a temperatur¹.
+
+Dane nie s¹ opatrzone datami. Zak³adamy jednak, ¿e kolejne obserwacje zapisane w zbiorze by³y rejestrowane chronologicznie. Na diagramie punktowym zaznaczyliœmy liniê trêdu pokazuj¹c¹ przeciêtn¹ d³ugoœæ z³owionych œledzi. Nasycenie barw¹ niebiesk¹ prezentuje temperaturê zarejestrowan¹ dla danego po³owu. B³êkit oznacza temperaturê najwy¿sz¹, ciemny granat najni¿sz¹. Na wykresie widaæ ¿e czerwona linia pnie siê do góry na tle zgrupowania ciemnych kropek, natomiast opada wraz z przewag¹ jasnych kropek w póŸniejszym okresie. Potwierdza to istotny wp³yw temperatury na zmianê przeciêtnej d³ugoœci œledzia.
+
+```{r, fig.width= 10, cache=T, message=F}
+
+p_mean_len_temp_time <- ggplot(tb_sledzie, aes(X, length, color = sst)) + geom_point() + geom_smooth(method = "auto", color = "red") + theme_light() + labs(title="zmiana d³ugoœci œledzi")
+
+
+ggplotly(p_mean_len_temp_time)
+```
+
+
+#Predykcja
+
+W niniejszym rozdziale zaprezentujemy metody uczenia maszynowego: podzia³ zbioru na ucz¹cy i testowy, stratyfikacjê danych oraz miary oceny regresji. Wykorzystamy do tego bibliotekê caret.
+
+##Podzia³ zbioru danych na zbiór ucz¹cy i testowy.
+
+Poni¿szy blok kodu rozpoczyna usuniêcie wartoœci odstaj¹cych, które ze wzglêdu na zbyt ma³¹ liczebnoœæ uniemo¿liwiaj¹ skuteczn¹ stratyfikacjê zbioru danych. Wartoœci odstaj¹ce wykorzystamy póŸniej dla sprawdzenia jak poradzi sobie z nimi wytrenowany przez nas model regresji.
+
+```{r}
+to_train_tb_sledzie <- tb_sledzie %>%
+    select(length, lcop1, fbar, sst) %>%
+    filter(length > 19 & length < 31.5)
+
+sledzie_outliers <- tb_sledzie %>%
+    select(length, lcop1, fbar, sst) %>%
+    filter(length <= 19 | length >= 31.5)
+
+set.seed(11)
+inTraining <- createDataPartition(
+                      y = to_train_tb_sledzie$length,
+                      p = 0.7,
+                      list = FALSE)
+
+training <- to_train_tb_sledzie[inTraining,]
+testing <- to_train_tb_sledzie[-inTraining,]
+
+
+```
+
+
+```{r train control}
+ctrl <- trainControl(
+    # powtórzona ocena krzy¿owa
+    method = "repeatedcv",
+    # liczba podzia³ów
+    number = 5,
+    # liczba powtórzeñ
+    repeats = 5)
+```
+
+##Wybór i dopasowanie modelu, algorytm Random Forest
+
+```{r, cache=TRUE, message= F}
+set.seed(11)
+fit_1 <- train(length ~ .,
+             data = training,
+             method = "rf",
+             importance=T,
+             trControl = ctrl,
+             ntree = 10)
+```
+
+```{r, cache=TRUE, message= F}
+set.seed(11)
+fit_ntree_30 <- train(length ~ .,
+             data = training,
+             importance=T,
+             method = "rf",
+             trControl = ctrl,
+             ntree = 30)
+```
+
+
+```{r, cache=T, message=FALSE, message= F}
+rfGrid <- expand.grid(mtry = 1:3)
+gridCtrl <- trainControl(
+    method = "repeatedcv",
+    number = 5,
+    repeats = 5)
+
+set.seed(11)
+fit_mtry_tune <- train(length ~ .,
+             data = training,
+             method = "rf",
+             metric = "RMSE",
+             importance=T,
+             trControl = gridCtrl,
+             tuneGrid = rfGrid,
+             ntree = 5)
+```
+
+```{r, cache=T, message= F}
+
+set.seed(11)
+fit_tune <- train(length ~ .,
+             data = training,
+             method = "rf",
+             metric = "RMSE",
+             importance=T,
+             trControl = gridCtrl,
+             tuneGrid = expand.grid(mtry = 3),
+             ntree = 10)
+```
+
+Poni¿sze wykresy prezentuj¹ kolejne kroki dopasowywania modelu mierzonego przy pomocy pierwiastka b³êdu œredniokwadratowego dla ró¿nych wartoœci parametru *mtry*. Pierwszy model zosta³ zaproponowany automatycznie. kolejny pokazuje nieznacz¹ poprawê dopasowania po zwiêkszeniu parametru ntree, natomiast ostatnio pokazuje badanie jakoœci dopasowanie dla ca³kowitych wartoœci parametru mtry z przedzia³u [2,20].
+
+
+```{r}
+ggp1 <- ggplot(fit_1) + theme_light() + labs(title = "ntree = 10", y="", x="mtry")
+ggp2 <- ggplot(fit_ntree_30) + theme_light() + labs(title = "ntree = 30", y="", x="mtry")
+ggp3 <- ggplot(fit_mtry_tune) + theme_light() + labs(title = "ntree = 5", y="", x="mtry")
+
+grid.arrange(ggp1, ggp2, ggp3, nrow=1, left="RMSE (Repeated Cross-Validation)", top = "Dopasowanie modelu")
+```
+
+
+```{r}
+kable(fit_1$results[,1:4])
+
+kable(fit_mtry_tune$results[,1:4])
+
+kable(fit_ntree_30$results[,1:4])
+```
+
+##Ocena wa¿noœci parametru
+
+```{r}
+plot(varImp(fit_tune))
+```
+
+Analiza wa¿noœci atrybutów pokazuje, ¿e najistotniejsza dla opisu zmiennoœci d³ugoœci œledzia jest temperatura przy powierzchni wody. Pozosta³e parametry zosta³y ocenione jako zdecydowanie mniej istotne.
+
+Na koniec poka¿emy jak wytrenowany przez nas model Random Forest poradzi³ sobie z danymi testowymi.
+
+```{r}
+rfPredicts <- predict(fit_tune, newdata = testing)
+
+rf_outliresPredicts <- predict(fit_tune, newdata=sledzie_outliers)
+
+RMSE(rfPredicts, testing$length)
+
+```
+
+
+
+
