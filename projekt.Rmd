@@ -1,7 +1,7 @@
 ---
 title: 'Programowanie w R: Projekt'
 author: "Karol Kaümierczak"
-date: "3 maja 2018"
+date: '`r Sys.Date()`'
 output: 
   html_document: 
     keep_md: yes
